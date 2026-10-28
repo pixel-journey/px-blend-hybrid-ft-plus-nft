@@ -25,9 +25,17 @@ test("insufficient FT is refused", () => {
 test("non-positive FT is refused", () => {
   const r = canCraft("alice", { ...vault, ft: 0 }, recipe);
   assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.reason, /non-positive/);
 });
 
 test("missing vault is refused", () => {
   const r = canCraft("alice", null, recipe);
   assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.reason, /no vault/);
+});
+
+test("unknown recipe is refused", () => {
+  const r = canCraft("alice", vault, null);
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.reason, /unknown recipe/);
 });

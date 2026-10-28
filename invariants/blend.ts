@@ -18,8 +18,8 @@ export function canCraft(
   if (!vault) return { ok: false, reason: "no vault" };
   if (caller !== vault.user) return { ok: false, reason: "not the owner" };
   if (!recipe) return { ok: false, reason: "unknown recipe" };
+  if (!Number.isInteger(vault.ft) || vault.ft <= 0) return { ok: false, reason: "non-positive FT" };
   if (vault.ft < recipe.ft_required) return { ok: false, reason: "insufficient FT" };
-  if (vault.ft <= 0) return { ok: false, reason: "non-positive FT" };
   if (vault.asset_ids.length === 0) return { ok: false, reason: "no NFTs" };
   // Template matching omitted for the minimal rule
   return { ok: true };
