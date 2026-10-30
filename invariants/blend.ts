@@ -14,6 +14,9 @@ export type Recipe = {
   ft_symbol: string;
   ft_contract: string;
   template_ids: number[];
+  output_collection: string;
+  output_schema: string;
+  output_template_id: number;
 };
 
 export type Gate = { ok: true } | { ok: false; reason: string };
@@ -28,6 +31,31 @@ export type UnsignedTransfer = {
     quantity?: string;
     asset_ids?: string[];
     memo: string;
+  };
+  sent: false;
+};
+
+export type UnsignedBurn = {
+  account: "atomicassets";
+  name: "burnasset";
+  authorization: { actor: string; permission: "active" }[];
+  data: { asset_owner: string; asset_id: string };
+  sent: false;
+};
+
+export type UnsignedMint = {
+  account: "atomicassets";
+  name: "mintasset";
+  authorization: { actor: string; permission: "active" }[];
+  data: {
+    authorized_minter: string;
+    collection_name: string;
+    schema_name: string;
+    template_id: number;
+    new_asset_owner: string;
+    immutable_data: [];
+    mutable_data: [];
+    tokens_to_back: [];
   };
   sent: false;
 };
@@ -75,6 +103,15 @@ export function canCraft(caller: string, vault: Vault | null, recipe: Recipe | n
   }
   if (recipe.ft_required < 1n) return { ok: false, reason: "bad recipe" };
   if (recipe.template_ids.length === 0) return { ok: false, reason: "empty recipe" };
+  try {
+    assertName(recipe.output_collection);
+    assertName(recipe.output_schema);
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : "bad name" };
+  }
+  if (!Number.isInteger(recipe.output_template_id) || recipe.output_template_id < 1) {
+    return { ok: false, reason: "bad recipe" };
+  }
   if (vault.ft < 1n) return { ok: false, reason: "non-positive FT" };
   if (vault.ft_symbol !== recipe.ft_symbol) return { ok: false, reason: "wrong symbol" };
   if (vault.ft_contract !== recipe.ft_contract) return { ok: false, reason: "wrong FT contract" };
@@ -112,11 +149,14 @@ export type CraftResult = {
   vault: Vault;
   consumedIds: bigint[];
   ftSpent: bigint;
+  burns: UnsignedBurn[];
+  mint: UnsignedMint;
   minted: null;
 };
 
-/** Debit the recipe. Extra FT and unmatched NFTs stay. Nothing is minted. */
-export function craft(caller: string, vault: Vault | null, recipe: Recipe | null): CraftResult {
+/** Debit the recipe and describe the burn and mint. Neither action is sent. PXJ is not burned. */
+export function craft(caller: string, vault: Vault | null, recipe: Recipe | null, self: string): CraftResult {
+  assertName(self);
   const gate = canCraft(caller, vault, recipe);
   if (!gate.ok) throw new Error(gate.reason);
   if (!vault || !recipe) throw new Error("no vault");
@@ -129,14 +169,38 @@ export function craft(caller: string, vault: Vault | null, recipe: Recipe | null
       .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     for (const id of matches.slice(0, count)) consumed.add(id.toString());
   }
+  const consumedIds = [...consumed].map((id) => BigInt(id)).sort((a, b) => (a < b ? -1 : 1));
   return {
     vault: {
       ...vault,
       ft: vault.ft - recipe.ft_required,
       assets: vault.assets.filter((asset) => !consumed.has(asset.id.toString())),
     },
-    consumedIds: [...consumed].map((id) => BigInt(id)).sort((a, b) => (a < b ? -1 : 1)),
+    consumedIds,
     ftSpent: recipe.ft_required,
+    burns: consumedIds.map((id) => ({
+      account: "atomicassets",
+      name: "burnasset",
+      authorization: [{ actor: self, permission: "active" }],
+      data: { asset_owner: self, asset_id: id.toString() },
+      sent: false,
+    })),
+    mint: {
+      account: "atomicassets",
+      name: "mintasset",
+      authorization: [{ actor: self, permission: "active" }],
+      data: {
+        authorized_minter: self,
+        collection_name: recipe.output_collection,
+        schema_name: recipe.output_schema,
+        template_id: recipe.output_template_id,
+        new_asset_owner: caller,
+        immutable_data: [],
+        mutable_data: [],
+        tokens_to_back: [],
+      },
+      sent: false,
+    },
     minted: null,
   };
 }

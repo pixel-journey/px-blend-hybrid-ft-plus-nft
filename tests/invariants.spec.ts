@@ -39,4 +39,9 @@ export const invariants = [
     attack: "Treat the withdraw action body as a broadcast.",
     expect: "asserted in blend.test.ts: sent is false. 0.50000000 PXJ.",
   },
+  {
+    id: "burn-mint",
+    attack: "Treat the burnasset and mintasset bodies as a completed craft.",
+    expect: "asserted in blend.test.ts: sent is false, mintasset has no asset id, PXJ is not burned.",
+  },
 ];

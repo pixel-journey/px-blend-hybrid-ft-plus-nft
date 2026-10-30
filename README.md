@@ -1,6 +1,6 @@
 # px-blend-hybrid-ft-plus-nft
 
-Private. The tested rule uses PXJ at 8 decimals from `pixeljourney`. It debits a matching recipe and can build an unsent withdraw. It does not mint.
+Private. The tested rule uses PXJ at 8 decimals from `pixeljourney`. Craft debits the book and returns one unsent `burnasset` per consumed id plus one unsent `mintasset`. It does not mint.
 
 ## What is true
 
@@ -12,7 +12,7 @@ Private. The tested rule uses PXJ at 8 decimals from `pixeljourney`. It debits a
 - A notify credits PXJ only when the first receiver is `pixeljourney`. `eosio.token` is refused.
 - Owner, symbol `8,PXJ`, that contract, and enough of each required template may craft.
 - Non-owner, missing vault, unknown recipe, non-positive FT, insufficient FT, and a template mismatch are refused.
-- Craft spends the required amount and the lowest asset id of each required template. Extra FT and other assets stay. `minted` is null.
+- Craft spends the required amount and the lowest asset id of each required template. Extra FT and other assets stay. Each consumed id gets an unsent `atomicassets::burnasset` whose `asset_owner` is the vault. One unsent `atomicassets::mintasset` names the recipe's output collection, schema, and template. It has no asset id. `minted` is null. PXJ is debited, not burned. `examplecol` and `examplesch` are example names, not a live collection.
 - Withdraw of the leftover returns a `pixeljourney::transfer` or `atomicassets::transfer` body with `sent: false`. A consumed asset id is missing. The input vault is unchanged.
 - A batch of 21 asset ids is refused. A second symbol on the same vault is refused.
 

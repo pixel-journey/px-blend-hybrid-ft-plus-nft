@@ -21,6 +21,9 @@ const recipe: Recipe = {
   ft_symbol: PXJ_SYMBOL,
   ft_contract: PXJ_CONTRACT,
   template_ids: [42],
+  output_collection: "examplecol",
+  output_schema: "examplesch",
+  output_template_id: 7,
 };
 
 const vault: Vault = {
@@ -126,9 +129,20 @@ test("craft debits one PXJ and leaves the extra asset", () => {
       { id: 9n, template_id: 7 },
     ],
   };
-  const result = craft("alice", held, recipe);
+  const result = craft("alice", held, recipe, "pxblend");
   assert.equal(result.minted, null);
   assert.deepEqual(result.consumedIds, [1001n]);
+  assert.equal(result.burns.length, 1);
+  assert.equal(result.burns[0].sent, false);
+  assert.equal(result.burns[0].name, "burnasset");
+  assert.deepEqual(result.burns[0].data, { asset_owner: "pxblend", asset_id: "1001" });
+  assert.equal(result.mint.sent, false);
+  assert.equal(result.mint.name, "mintasset");
+  assert.equal(result.mint.data.collection_name, "examplecol");
+  assert.equal(result.mint.data.schema_name, "examplesch");
+  assert.equal(result.mint.data.template_id, 7);
+  assert.equal(result.mint.data.new_asset_owner, "alice");
+  assert.equal("asset_id" in result.mint.data, false);
   assert.equal(result.ftSpent, ONE);
   assert.equal(result.vault.ft, ONE / 2n);
   assert.deepEqual(result.vault.assets.map((asset) => asset.id), [1002n, 9n]);
@@ -136,7 +150,7 @@ test("craft debits one PXJ and leaves the extra asset", () => {
 });
 
 test("a refused craft does not debit", () => {
-  assert.throws(() => craft("alice", vault, { ...recipe, template_ids: [9] }), /template mismatch/);
+  assert.throws(() => craft("alice", vault, { ...recipe, template_ids: [9] }, "pxblend"), /template mismatch/);
   assert.equal(vault.ft, ONE);
 });
 
@@ -193,18 +207,18 @@ test("deposits then craft once, and the second craft is refused", () => {
     templateIds: [42],
     memo: "blend:1",
   });
-  const once = craft("alice", held.vault, recipe);
+  const once = craft("alice", held.vault, recipe, "pxblend");
   assert.equal(once.vault.ft, 0n);
   assert.equal(once.vault.assets.length, 0);
   assert.equal(once.minted, null);
-  assert.throws(() => craft("alice", once.vault, recipe), /non-positive FT/);
+  assert.throws(() => craft("alice", once.vault, recipe, "pxblend"), /non-positive FT/);
 });
 
 test("the owner withdraws the leftover half PXJ and it is not sent", () => {
   const crafted = craft("alice", { ...vault, ft: ONE + ONE / 2n, assets: [
     { id: 1001n, template_id: 42 },
     { id: 9n, template_id: 7 },
-  ] }, recipe);
+  ] }, recipe, "pxblend");
   const out = withdrawFt("alice", crafted.vault, ONE / 2n, "pxblend");
   assert.equal(out.action.sent, false);
   assert.equal(out.action.account, "pixeljourney");
@@ -224,11 +238,33 @@ test("a consumed asset cannot be withdrawn and the leftover can", () => {
       { id: 1001n, template_id: 42 },
       { id: 9n, template_id: 7 },
     ],
-  }, recipe);
+  }, recipe, "pxblend");
   assert.throws(() => withdrawNfts("alice", crafted.vault, [1001n], "pxblend"), /missing asset/);
   const out = withdrawNfts("alice", crafted.vault, [9n], "pxblend");
   assert.equal(out.action.sent, false);
   assert.equal(out.action.account, "atomicassets");
   assert.deepEqual(out.action.data.asset_ids, ["9"]);
   assert.equal(out.vault.assets.length, 0);
+});
+
+test("two consumed assets become two unsent burns and PXJ is not burned", () => {
+  const result = craft("alice", {
+    ...vault,
+    assets: [
+      { id: 1002n, template_id: 42 },
+      { id: 1001n, template_id: 42 },
+    ],
+  }, { ...recipe, template_ids: [42, 42] }, "pxblend");
+  assert.deepEqual(result.consumedIds, [1001n, 1002n]);
+  assert.deepEqual(result.burns.map((burn) => burn.data.asset_id), ["1001", "1002"]);
+  assert.equal(result.burns.every((burn) => burn.sent === false), true);
+  assert.equal(result.mint.sent, false);
+  assert.equal(result.burns.some((burn) => burn.account === "pixeljourney"), false);
+  assert.equal(result.mint.account, "atomicassets");
+});
+
+test("a bad output collection is refused before any burn", () => {
+  const result = canCraft("alice", vault, { ...recipe, output_collection: ".bad" });
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.reason, "bad name");
 });

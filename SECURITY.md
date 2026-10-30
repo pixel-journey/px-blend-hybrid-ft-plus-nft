@@ -16,16 +16,16 @@
 
 ## Atomicity
 
-`craft` either returns a vault with the FT and the matched assets removed, or throws before returning. It does not mint. Withdraw returns an action body and sets `sent` to false. Nothing in `npm test` broadcasts.
+`craft` either returns a vault with the FT and the matched assets removed, plus unsent burn and mint bodies, or throws before returning. `minted` stays null. Withdraw and those AtomicAssets bodies set `sent` to false. Nothing in `npm test` broadcasts.
 
 ## What the tested rule covers
 
 `npm test` runs `invariants/blend.test.ts`.
 
-- 8-decimal PXJ, `pixeljourney` only, template counts, debit, unsent withdraw.
+- 8-decimal PXJ, `pixeljourney` only, template counts, debit, unsent withdraw, unsent `burnasset`, unsent `mintasset` with no new id.
 - Non-owner, missing vault, unknown recipe, non-positive FT, insufficient FT, template mismatch.
 - Fake token contract, fake NFT contract, transfer not to the vault, outgoing transfer, batch of 21, mixed symbol.
 
 ## Current status
 
-Mint, burn, a broadcast withdraw, and an AtomicAssets ownership read are not implemented. The C++ sketch is uncompiled and still does not match this rule.
+The burn and mint bodies are not sent. A broadcast, and an AtomicAssets ownership read, are not implemented. The C++ sketch is uncompiled and still does not match this rule.

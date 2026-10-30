@@ -16,7 +16,7 @@ One notification cannot see both an FT transfer and an NFT transfer. The client 
 - Extra assets stay. This is not the exact-set rule in `px-blend-simple-nft-to-nft`.
 - The FT debit and the asset removal happen in the returned vault together. A mismatch throws first.
 - Withdraw formats the leftover with 8 decimals and marks the action unsent. That is the body a later contract would send. This pass does not send it.
-- The result does not contain a new asset id. Mint and burn are not this pass.
+- The result does not contain a new asset id. `mintasset` is only the unsent body. `burnasset` is one unsent body per consumed id. The spent PXJ stays a book debit. There is no `pixeljourney` burn.
 
 ## What is still uncompiled
 
