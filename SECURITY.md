@@ -2,30 +2,30 @@
 
 ## Authorization
 
-- Only the user who owns the deposited ingredients may call craft for that vault.
-- Only the admin may add or change recipes.
-- NFT transfers into the vault must be authorized by the current owner of each asset.
+- Only the user on the vault may craft it.
+- A notify credits only when `from` is that user. A different `from` is refused.
+- NFT ownership on AtomicAssets is not read here. The book trusts the notify arguments. That is not a chain check.
 
 ## Inputs
 
-- FT quantity must be positive and of the expected symbol.
-- Template ids must exist and match the recipe.
-- Asset ids must be owned by the depositor at the moment of deposit and still match at craft time.
-- Empty or mismatched ingredient sets are refused.
+- FT quantity must parse as `amount.precision SYMBOL` and be positive.
+- The first credit sets the symbol. A later credit in another symbol is refused.
+- At most 20 asset ids per notify. Ids must be unique, including ids already in the vault.
+- Template counts must cover the recipe. Extra held assets do not have to be part of the recipe.
 
 ## Atomicity
 
-The craft action must either fully succeed (ingredients burned or transferred, result minted or transferred, vault cleared) or fully revert. A partial success that burns ingredients without delivering the result is a loss of user funds.
+`craft` either returns a vault with the FT and the matched assets removed, or throws before returning. It does not mint. A chain transaction that puts both transfers and `craft` in one transaction still depends on the contract, which is not compiled.
 
 ## What the tested rule covers
 
 `npm test` runs `invariants/blend.test.ts`.
 
-- Owner with sufficient ingredients may craft.
-- Non-owner is refused.
-- Insufficient or non-positive FT is refused.
-- Missing vault is refused.
+- Owner, symbol, and template counts.
+- Non-owner, missing vault, unknown recipe, non-positive FT, insufficient FT, template mismatch.
+- Fake token contract, fake NFT contract, transfer not to the vault, outgoing transfer, batch of 21, mixed symbol.
+- Debit leaves leftovers. A thrown craft leaves the input vault as it was. `minted` is null.
 
 ## Current status
 
-The TypeScript rule exists. The C++ sketch is uncompiled and has not been shown to match the test. Asset matching, burn, and mint are not implemented. The sketch is not the implementation.
+The TypeScript rule covers the book. Withdrawal transfers, mint, burn, and an AtomicAssets ownership read are not implemented. The C++ sketch is uncompiled and has not been shown to match the test.

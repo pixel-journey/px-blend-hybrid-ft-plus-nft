@@ -1,17 +1,18 @@
 # Education
 
-Quest 047. Seeded. No tested rule yet.
+Quest 047. The tested rule is the vault book, not a mint.
 
-## The intended pattern
+## The pattern
 
-FT and NFT ingredients are deposited into a vault. A later craft action verifies the vault against a recipe, burns or transfers the ingredients, and mints or transfers the result. The craft is all-or-nothing.
+One notification cannot see both an FT transfer and an NFT transfer. The client sends the token transfer, the AtomicAssets transfer, and `craft` in one transaction. Each notify either credits this vault or returns. `craft` then checks the book.
 
-## Why two steps
+## What the test enforces
 
-A single action that both pulls complex ingredient sets and crafts is harder to reason about under partial failure. The deposit-then-craft split makes the verification step explicit.
+- The recipe is a multiset of template ids. One asset of template 7 does not satisfy a recipe that asks for template 42. Two asks need two held assets.
+- Extra assets stay. This is not the exact-set rule in `px-blend-simple-nft-to-nft`.
+- The FT debit and the asset removal happen in the returned vault together. A mismatch throws first, so the input book is unchanged.
+- The result does not contain a new asset id. Mint and burn are not this pass.
 
-## Current state
+## What is still uncompiled
 
-There is an uncompiled C++ sketch. There is no `npm test` rule. There is no wasm.
-
-The sketch is not the implementation.
+The C++ sketch has the notify guards and then an unfinished `craft`. It has not been shown to match `invariants/blend.ts`.
