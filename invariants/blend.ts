@@ -4,6 +4,7 @@ export type Vault = {
   user: string;
   ft: bigint;
   ft_symbol: string;
+  ft_contract: string;
   assets: Asset[];
 };
 
@@ -11,21 +12,37 @@ export type Recipe = {
   id: number;
   ft_required: bigint;
   ft_symbol: string;
+  ft_contract: string;
   template_ids: number[];
 };
 
-export type Gate =
-  | { ok: true }
-  | { ok: false; reason: string };
+export type Gate = { ok: true } | { ok: false; reason: string };
+
+export type UnsignedTransfer = {
+  account: string;
+  name: "transfer";
+  authorization: { actor: string; permission: "active" }[];
+  data: {
+    from: string;
+    to: string;
+    quantity?: string;
+    asset_ids?: string[];
+    memo: string;
+  };
+  sent: false;
+};
+
+/** PXJ is issued by pixeljourney. get_currency_stats on 2026-10-30: max_supply 10000000000.00000000 PXJ. */
+export const PXJ_CONTRACT = "pixeljourney";
+export const PXJ_SYMBOL = "8,PXJ";
+export const PXJ_PRECISION = 8;
 
 const NAME = /^[a-z1-5.]{1,12}$/;
 const INT64_MAX = 9223372036854775807n;
 const UINT64_MAX = 18446744073709551615n;
 
 export function assertName(name: string): string {
-  if (!NAME.test(name) || name.startsWith(".") || name.endsWith(".")) {
-    throw new Error("bad name");
-  }
+  if (!NAME.test(name) || name.startsWith(".") || name.endsWith(".")) throw new Error("bad name");
   return name;
 }
 
@@ -38,14 +55,29 @@ function countTemplates(ids: readonly number[]): Map<number, number> {
   return counts;
 }
 
+function assertSymbol(symbol: string): { precision: number; code: string } {
+  const match = /^([0-9]{1,2}),([A-Z]{1,7})$/.exec(symbol);
+  if (!match) throw new Error("bad quantity");
+  const precision = Number(match[1]);
+  if (precision > 18) throw new Error("bad quantity");
+  if (match[2] === "PXJ" && precision !== PXJ_PRECISION) throw new Error("pxj precision");
+  return { precision, code: match[2] };
+}
+
 export function canCraft(caller: string, vault: Vault | null, recipe: Recipe | null): Gate {
   if (!vault) return { ok: false, reason: "no vault" };
   if (caller !== vault.user) return { ok: false, reason: "not the owner" };
   if (!recipe) return { ok: false, reason: "unknown recipe" };
+  try {
+    assertSymbol(recipe.ft_symbol);
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : "bad quantity" };
+  }
   if (recipe.ft_required < 1n) return { ok: false, reason: "bad recipe" };
   if (recipe.template_ids.length === 0) return { ok: false, reason: "empty recipe" };
   if (vault.ft < 1n) return { ok: false, reason: "non-positive FT" };
   if (vault.ft_symbol !== recipe.ft_symbol) return { ok: false, reason: "wrong symbol" };
+  if (vault.ft_contract !== recipe.ft_contract) return { ok: false, reason: "wrong FT contract" };
   if (vault.ft < recipe.ft_required) return { ok: false, reason: "insufficient FT" };
   if (vault.assets.length === 0) return { ok: false, reason: "no NFTs" };
 
@@ -99,9 +131,8 @@ export function craft(caller: string, vault: Vault | null, recipe: Recipe | null
   }
   return {
     vault: {
-      user: vault.user,
+      ...vault,
       ft: vault.ft - recipe.ft_required,
-      ft_symbol: vault.ft_symbol,
       assets: vault.assets.filter((asset) => !consumed.has(asset.id.toString())),
     },
     consumedIds: [...consumed].map((id) => BigInt(id)).sort((a, b) => (a < b ? -1 : 1)),
@@ -113,13 +144,25 @@ export function craft(caller: string, vault: Vault | null, recipe: Recipe | null
 export function parseQuantity(quantity: string): { amount: bigint; symbol: string } {
   const match = /^([0-9]+)\.([0-9]{1,18}) ([A-Z]{1,7})$/.exec(quantity);
   if (!match) throw new Error("bad quantity");
+  const symbol = `${match[2].length},${match[3]}`;
+  assertSymbol(symbol);
   const amount = BigInt(match[1] + match[2]);
   if (amount > INT64_MAX) throw new Error("ft cap");
-  return { amount, symbol: `${match[2].length},${match[3]}` };
+  return { amount, symbol };
+}
+
+export function formatQuantity(amount: bigint, symbol: string): string {
+  const { precision, code } = assertSymbol(symbol);
+  if (amount < 0n || amount > INT64_MAX) throw new Error("ft cap");
+  const scale = 10n ** BigInt(precision);
+  const whole = amount / scale;
+  const frac = (amount % scale).toString().padStart(precision, "0");
+  return `${whole}.${frac} ${code}`;
 }
 
 export type FtNotify = {
   firstReceiver: string;
+  tokenContract: string;
   from: string;
   to: string;
   self: string;
@@ -131,19 +174,33 @@ export function applyFtNotify(vault: Vault | null, note: FtNotify): { vault: Vau
   assertName(note.from);
   assertName(note.to);
   assertName(note.self);
-  if (note.firstReceiver !== "eosio.token") throw new Error("fake token");
+  assertName(note.tokenContract);
+  if (note.firstReceiver !== note.tokenContract) throw new Error("fake token");
   if (note.from === note.self || note.to !== note.self) return { vault, credited: 0n };
   if (!note.memo.startsWith("blend:")) throw new Error("memo must start with blend:");
   const parsed = parseQuantity(note.quantity);
   if (parsed.amount < 1n) throw new Error("non-positive FT");
   if (!vault) {
     return {
-      vault: { user: note.from, ft: parsed.amount, ft_symbol: parsed.symbol, assets: [] },
+      vault: {
+        user: note.from,
+        ft: parsed.amount,
+        ft_symbol: parsed.symbol,
+        ft_contract: note.tokenContract,
+        assets: [],
+      },
       credited: parsed.amount,
     };
   }
   if (vault.user !== note.from) throw new Error("not the owner");
+  if (vault.ft_symbol === "") {
+    return {
+      vault: { ...vault, assets: vault.assets.slice(), ft: parsed.amount, ft_symbol: parsed.symbol, ft_contract: note.tokenContract },
+      credited: parsed.amount,
+    };
+  }
   if (vault.ft_symbol !== parsed.symbol) throw new Error("mixed symbols");
+  if (vault.ft_contract !== note.tokenContract) throw new Error("mixed contracts");
   if (vault.ft > INT64_MAX - parsed.amount) throw new Error("ft cap");
   return {
     vault: { ...vault, assets: vault.assets.slice(), ft: vault.ft + parsed.amount },
@@ -184,7 +241,7 @@ export function applyNftNotify(vault: Vault | null, note: NftNotify): { vault: V
   }
   if (!vault) {
     return {
-      vault: { user: note.from, ft: 0n, ft_symbol: "", assets: incoming },
+      vault: { user: note.from, ft: 0n, ft_symbol: "", ft_contract: "", assets: incoming },
       credited: incoming.map((asset) => asset.id),
     };
   }
@@ -192,5 +249,56 @@ export function applyNftNotify(vault: Vault | null, note: NftNotify): { vault: V
   return {
     vault: { ...vault, assets: vault.assets.concat(incoming) },
     credited: incoming.map((asset) => asset.id),
+  };
+}
+
+function copy(vault: Vault): Vault {
+  return { ...vault, assets: vault.assets.slice() };
+}
+
+/** Book only. The returned transfer is not sent. */
+export function withdrawFt(caller: string, vault: Vault | null, amount: bigint, self: string): { vault: Vault; action: UnsignedTransfer } {
+  if (!vault) throw new Error("no vault");
+  if (caller !== vault.user) throw new Error("not the owner");
+  assertName(self);
+  assertName(vault.ft_contract);
+  if (amount < 1n) throw new Error("non-positive FT");
+  if (amount > vault.ft) throw new Error("insufficient FT");
+  const quantity = formatQuantity(amount, vault.ft_symbol);
+  return {
+    vault: { ...copy(vault), ft: vault.ft - amount },
+    action: {
+      account: vault.ft_contract,
+      name: "transfer",
+      authorization: [{ actor: self, permission: "active" }],
+      data: { from: self, to: vault.user, quantity, memo: "withdraw" },
+      sent: false,
+    },
+  };
+}
+
+/** Book only. The returned transfer is not sent. */
+export function withdrawNfts(caller: string, vault: Vault | null, assetIds: bigint[], self: string): { vault: Vault; action: UnsignedTransfer } {
+  if (!vault) throw new Error("no vault");
+  if (caller !== vault.user) throw new Error("not the owner");
+  assertName(self);
+  if (assetIds.length === 0 || assetIds.length > 20) throw new Error("bad asset batch");
+  const held = new Map(vault.assets.map((asset) => [asset.id.toString(), asset]));
+  const seen = new Set<string>();
+  for (const id of assetIds) {
+    const key = id.toString();
+    if (seen.has(key)) throw new Error("duplicate asset");
+    seen.add(key);
+    if (!held.has(key)) throw new Error("missing asset");
+  }
+  return {
+    vault: { ...copy(vault), assets: vault.assets.filter((asset) => !seen.has(asset.id.toString())) },
+    action: {
+      account: "atomicassets",
+      name: "transfer",
+      authorization: [{ actor: self, permission: "active" }],
+      data: { from: self, to: vault.user, asset_ids: assetIds.map((id) => id.toString()), memo: "withdraw" },
+      sent: false,
+    },
   };
 }

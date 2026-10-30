@@ -1,8 +1,13 @@
 export const invariants = [
   {
+    id: "pxj-precision",
+    attack: "Credit 1.0000 PXJ.",
+    expect: "asserted in blend.test.ts: pxj precision. PXJ is 8 decimals on pixeljourney.",
+  },
+  {
     id: "fake-ft",
-    attack: "A foreign contract notifies an eosio.token::transfer shape.",
-    expect: "asserted in blend.test.ts: fake token",
+    attack: "eosio.token notifies a PXJ transfer.",
+    expect: "asserted in blend.test.ts: fake token. The issuer is pixeljourney.",
   },
   {
     id: "fake-nft",
@@ -11,7 +16,7 @@ export const invariants = [
   },
   {
     id: "self-payout",
-    attack: "A later mint or refund notifies this contract.",
+    attack: "A later refund notifies this contract.",
     expect: "asserted in blend.test.ts: from == self credits nothing",
   },
   {
@@ -21,7 +26,7 @@ export const invariants = [
   },
   {
     id: "wrong-symbol",
-    attack: "Deposit WAX against a balance already priced in PXJ.",
+    attack: "Deposit WAX against a PXJ balance.",
     expect: "asserted in blend.test.ts: mixed symbols",
   },
   {
@@ -30,8 +35,8 @@ export const invariants = [
     expect: "asserted in blend.test.ts: template mismatch, no debit",
   },
   {
-    id: "no-partial-success",
-    attack: "Treat a reverted craft as if the FT was spent.",
-    expect: "craft throws and the input vault object is unchanged. No mint.",
+    id: "withdraw",
+    attack: "Treat the withdraw action body as a broadcast.",
+    expect: "asserted in blend.test.ts: sent is false. 0.50000000 PXJ.",
   },
 ];
