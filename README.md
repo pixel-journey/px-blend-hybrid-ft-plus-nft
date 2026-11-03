@@ -1,6 +1,6 @@
 # px-blend-hybrid-ft-plus-nft
 
-Private. The tested rule uses PXJ at 8 decimals from `pixeljourney`. An NFT credit stores the template and collection from a chain row, not from the client. Craft debits the book and returns unsent `burnasset` and `mintasset` bodies. It does not mint.
+Private. The tested rule uses PXJ at 8 decimals from `pixeljourney`. An NFT credit stores the template and collection from a chain row, not from the client. Craft debits only when chain rows say this contract may mint the output template. The burn and mint bodies are unsent. It does not mint.
 
 ## What is true
 
@@ -11,7 +11,8 @@ Private. The tested rule uses PXJ at 8 decimals from `pixeljourney`. An NFT cred
 - `1.00000000 PXJ` is 100000000 units. `1.0000 PXJ` is refused.
 - A notify credits PXJ only when the first receiver is `pixeljourney`. `eosio.token` is refused.
 - An NFT notify credits only when each id has a row with `source: "chain"`, the owner is already the vault, and the client's template id matches that row. The stored collection is the row's collection. A missing row, a pre-transfer owner, or a third-party owner is refused.
-- Owner, symbol `8,PXJ`, that contract, and enough of each required template in `ingredient_collection` may craft. The same template id in another collection does not count.
+- Craft also requires a chain row for the output collection and a chain row for the output template. The vault must be the author or in `authorized_accounts`. The template's collection, schema, and id must match the recipe. `max_supply` of 0 means no cap. A full template is refused. `issued_supply` is not incremented. No row is refused. This is not a live collections or templates read.
+- Owner, symbol `8,PXJ`, that contract, and enough of each required template in `ingredient_collection` may craft. The same template id in another collection does not count. The ingredient gate does not itself check minter rights. `craft` does, and it throws before any debit.
 - Non-owner, missing vault, unknown recipe, non-positive FT, insufficient FT, a template mismatch, and the wrong collection are refused.
 - Craft spends the required amount and the lowest asset id of each required template in that collection. Extra FT and other assets stay. Each consumed id gets an unsent `atomicassets::burnasset` whose `asset_owner` is the vault. One unsent `atomicassets::mintasset` names the recipe's output collection, schema, and template. It has no asset id. `minted` is null. PXJ is debited, not burned. `examplecol` and `examplesch` are example names, not a live collection.
 - Withdraw of the leftover returns a `pixeljourney::transfer` or `atomicassets::transfer` body with `sent: false`. A consumed asset id is missing. The input vault is unchanged.

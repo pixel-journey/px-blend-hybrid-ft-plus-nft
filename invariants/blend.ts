@@ -74,6 +74,24 @@ export type ChainAsset = {
   template_id: number;
 };
 
+/** A row the contract would have read from atomicassets::collections. Not a node call. */
+export type ChainCollection = {
+  source: "chain";
+  collection_name: string;
+  author: string;
+  authorized_accounts: string[];
+};
+
+/** A row the contract would have read from the collection's templates table. max_supply 0 means no cap. */
+export type ChainTemplate = {
+  source: "chain";
+  collection_name: string;
+  schema_name: string;
+  template_id: number;
+  max_supply: number;
+  issued_supply: number;
+};
+
 /** PXJ is issued by pixeljourney. get_currency_stats on 2026-10-30: max_supply 10000000000.00000000 PXJ. */
 export const PXJ_CONTRACT = "pixeljourney";
 export const PXJ_SYMBOL = "8,PXJ";
@@ -174,12 +192,47 @@ export type CraftResult = {
   minted: null;
 };
 
-/** Debit the recipe and describe the burn and mint. Neither action is sent. PXJ is not burned. */
-export function craft(caller: string, vault: Vault | null, recipe: Recipe | null, self: string): CraftResult {
+function assertMintRead(
+  self: string,
+  recipe: Recipe,
+  collection: ChainCollection | null,
+  template: ChainTemplate | null,
+): void {
+  if (!collection || collection.source !== "chain") throw new Error("not chain sourced");
+  if (!template || template.source !== "chain") throw new Error("not chain sourced");
+  assertName(collection.collection_name);
+  assertName(collection.author);
+  if (collection.collection_name !== recipe.output_collection) throw new Error("wrong collection");
+  for (const account of collection.authorized_accounts) assertName(account);
+  if (collection.author !== self && !collection.authorized_accounts.includes(self)) {
+    throw new Error("not a minter");
+  }
+  assertName(template.collection_name);
+  assertName(template.schema_name);
+  if (template.collection_name !== recipe.output_collection) throw new Error("wrong collection");
+  if (template.schema_name !== recipe.output_schema) throw new Error("wrong schema");
+  if (!Number.isInteger(template.template_id) || template.template_id !== recipe.output_template_id) {
+    throw new Error("template mismatch");
+  }
+  if (!Number.isInteger(template.max_supply) || template.max_supply < 0) throw new Error("bad template");
+  if (!Number.isInteger(template.issued_supply) || template.issued_supply < 0) throw new Error("bad template");
+  if (template.max_supply !== 0 && template.issued_supply >= template.max_supply) throw new Error("template full");
+}
+
+/** Debit the recipe and describe the burn and mint. Neither action is sent. PXJ is not burned. Issued supply is not incremented. */
+export function craft(
+  caller: string,
+  vault: Vault | null,
+  recipe: Recipe | null,
+  self: string,
+  collection: ChainCollection | null,
+  template: ChainTemplate | null,
+): CraftResult {
   assertName(self);
   const gate = canCraft(caller, vault, recipe);
   if (!gate.ok) throw new Error(gate.reason);
   if (!vault || !recipe) throw new Error("no vault");
+  assertMintRead(self, recipe, collection, template);
   const need = countTemplates(recipe.template_ids);
   const consumed = new Set<string>();
   for (const [template, count] of need) {

@@ -49,4 +49,9 @@ export const invariants = [
     attack: "Credit a template the client claims, or a row whose owner is still the sender.",
     expect: "asserted in blend.test.ts: not chain sourced, template mismatch, stale owner. No node is called.",
   },
+  {
+    id: "minter",
+    attack: "Return mintasset when this contract is not authorized, or when the template is full.",
+    expect: "asserted in blend.test.ts: not a minter, template full, wrong schema. issued_supply is unchanged. No debit.",
+  },
 ];

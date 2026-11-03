@@ -10,6 +10,8 @@ import {
   withdrawFt,
   withdrawNfts,
   type ChainAsset,
+  type ChainCollection,
+  type ChainTemplate,
   type Recipe,
   type Vault,
 } from "./blend.ts";
@@ -55,6 +57,23 @@ const row = (
   owner = "pxblend",
   collection_name = COL,
 ): ChainAsset => ({ source: "chain", id, owner, collection_name, template_id });
+
+const collection = (authorized: string[] = ["pxblend"], author = "authorname"): ChainCollection => ({
+  source: "chain",
+  collection_name: COL,
+  author,
+  authorized_accounts: authorized,
+});
+
+const outputTemplate = (over: Partial<ChainTemplate> = {}): ChainTemplate => ({
+  source: "chain",
+  collection_name: COL,
+  schema_name: "examplesch",
+  template_id: 7,
+  max_supply: 0,
+  issued_supply: 3,
+  ...over,
+});
 
 const nft = (ids: bigint[], templates: number[]) => ({
   firstReceiver: "atomicassets",
@@ -139,7 +158,7 @@ test("the same template id in another collection is refused", () => {
   assert.throws(() => craft("alice", {
     ...vault,
     assets: [asset(1001n, 42, "othercol")],
-  }, recipe, "pxblend"), /wrong collection/);
+  }, recipe, "pxblend", collection(), outputTemplate()), /wrong collection/);
   assert.equal(vault.ft, ONE);
 });
 
@@ -158,7 +177,7 @@ test("craft debits one PXJ and leaves the extra asset", () => {
     ft: ONE + ONE / 2n,
     assets: [asset(1002n, 42), asset(1001n, 42), asset(9n, 7)],
   };
-  const result = craft("alice", held, recipe, "pxblend");
+  const result = craft("alice", held, recipe, "pxblend", collection(), outputTemplate());
   assert.equal(result.minted, null);
   assert.deepEqual(result.consumedIds, [1001n]);
   assert.equal(result.burns.length, 1);
@@ -179,7 +198,7 @@ test("craft debits one PXJ and leaves the extra asset", () => {
 });
 
 test("a refused craft does not debit", () => {
-  assert.throws(() => craft("alice", vault, { ...recipe, template_ids: [9] }, "pxblend"), /template mismatch/);
+  assert.throws(() => craft("alice", vault, { ...recipe, template_ids: [9] }, "pxblend", collection(), outputTemplate()), /template mismatch/);
   assert.equal(vault.ft, ONE);
 });
 
@@ -249,20 +268,20 @@ test("the credited template and collection come from the chain row", () => {
 test("deposits then craft once, and the second craft is refused", () => {
   const paid = applyFtNotify(null, pxj("1.00000000 PXJ"));
   const held = applyNftNotify(paid.vault, nft([1001n], [42]), [row(1001n)]);
-  const once = craft("alice", held.vault, recipe, "pxblend");
+  const once = craft("alice", held.vault, recipe, "pxblend", collection(), outputTemplate());
   assert.equal(once.vault.ft, 0n);
   assert.equal(once.vault.assets.length, 0);
   assert.equal(once.minted, null);
   assert.equal(once.burns[0].sent, false);
   assert.equal(once.mint.sent, false);
-  assert.throws(() => craft("alice", once.vault, recipe, "pxblend"), /non-positive FT/);
+  assert.throws(() => craft("alice", once.vault, recipe, "pxblend", collection(), outputTemplate()), /non-positive FT/);
 });
 
 test("the owner withdraws the leftover half PXJ and it is not sent", () => {
   const crafted = craft("alice", { ...vault, ft: ONE + ONE / 2n, assets: [
     asset(1001n, 42),
     asset(9n, 7),
-  ] }, recipe, "pxblend");
+  ] }, recipe, "pxblend", collection(), outputTemplate());
   const out = withdrawFt("alice", crafted.vault, ONE / 2n, "pxblend");
   assert.equal(out.action.sent, false);
   assert.equal(out.action.account, "pixeljourney");
@@ -279,7 +298,7 @@ test("a consumed asset cannot be withdrawn and the leftover can", () => {
   const crafted = craft("alice", {
     ...vault,
     assets: [asset(1001n, 42), asset(9n, 7)],
-  }, recipe, "pxblend");
+  }, recipe, "pxblend", collection(), outputTemplate());
   assert.throws(() => withdrawNfts("alice", crafted.vault, [1001n], "pxblend"), /missing asset/);
   const out = withdrawNfts("alice", crafted.vault, [9n], "pxblend");
   assert.equal(out.action.sent, false);
@@ -292,7 +311,7 @@ test("two consumed assets become two unsent burns and PXJ is not burned", () => 
   const result = craft("alice", {
     ...vault,
     assets: [asset(1002n, 42), asset(1001n, 42)],
-  }, { ...recipe, template_ids: [42, 42] }, "pxblend");
+  }, { ...recipe, template_ids: [42, 42] }, "pxblend", collection(), outputTemplate());
   assert.deepEqual(result.consumedIds, [1001n, 1002n]);
   assert.deepEqual(result.burns.map((burn) => burn.data.asset_id), ["1001", "1002"]);
   assert.equal(result.burns.every((burn) => burn.sent === false), true);
@@ -305,4 +324,51 @@ test("a bad output collection is refused before any burn", () => {
   const result = canCraft("alice", vault, { ...recipe, output_collection: ".bad" });
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.reason, "bad name");
+});
+
+test("a craft with no collection row does not debit", () => {
+  const before = vault.ft;
+  assert.throws(() => craft("alice", vault, recipe, "pxblend", null, outputTemplate()), /not chain sourced/);
+  assert.throws(() => craft("alice", vault, recipe, "pxblend", collection(), null), /not chain sourced/);
+  assert.equal(vault.ft, before);
+});
+
+test("a contract that is not the author and not authorized does not debit", () => {
+  const before = vault.ft;
+  assert.throws(() => craft(
+    "alice",
+    vault,
+    recipe,
+    "pxblend",
+    collection([], "someoneelse"),
+    outputTemplate(),
+  ), /not a minter/);
+  assert.equal(vault.ft, before);
+  const asAuthor = craft("alice", vault, recipe, "pxblend", collection([], "pxblend"), outputTemplate());
+  assert.equal(asAuthor.mint.sent, false);
+  assert.equal(asAuthor.mint.data.authorized_minter, "pxblend");
+  assert.equal(asAuthor.ftSpent, ONE);
+});
+
+test("a full template does not debit and issued supply stays put", () => {
+  const full = outputTemplate({ max_supply: 10, issued_supply: 10 });
+  assert.throws(() => craft("alice", vault, recipe, "pxblend", collection(), full), /template full/);
+  assert.equal(full.issued_supply, 10);
+  assert.equal(vault.ft, ONE);
+  const open = outputTemplate({ max_supply: 0, issued_supply: 100 });
+  const result = craft("alice", vault, recipe, "pxblend", collection(), open);
+  assert.equal(result.minted, null);
+  assert.equal(open.issued_supply, 100);
+});
+
+test("a template schema that disagrees with the recipe does not debit", () => {
+  assert.throws(() => craft(
+    "alice",
+    vault,
+    recipe,
+    "pxblend",
+    collection(),
+    outputTemplate({ schema_name: "othersch" }),
+  ), /wrong schema/);
+  assert.equal(vault.ft, ONE);
 });
