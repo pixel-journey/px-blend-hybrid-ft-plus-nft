@@ -9,11 +9,15 @@ import {
   craft,
   withdrawFt,
   withdrawNfts,
+  type ChainAsset,
   type Recipe,
   type Vault,
 } from "./blend.ts";
 
 const ONE = 100_000_000n;
+const COL = "examplecol";
+
+const asset = (id: bigint, template_id: number, collection_name = COL) => ({ id, template_id, collection_name });
 
 const recipe: Recipe = {
   id: 1,
@@ -21,7 +25,8 @@ const recipe: Recipe = {
   ft_symbol: PXJ_SYMBOL,
   ft_contract: PXJ_CONTRACT,
   template_ids: [42],
-  output_collection: "examplecol",
+  ingredient_collection: COL,
+  output_collection: COL,
   output_schema: "examplesch",
   output_template_id: 7,
 };
@@ -31,7 +36,7 @@ const vault: Vault = {
   ft: ONE,
   ft_symbol: PXJ_SYMBOL,
   ft_contract: PXJ_CONTRACT,
-  assets: [{ id: 1001n, template_id: 42 }],
+  assets: [asset(1001n, 42)],
 };
 
 const pxj = (quantity: string) => ({
@@ -41,6 +46,23 @@ const pxj = (quantity: string) => ({
   to: "pxblend",
   self: "pxblend",
   quantity,
+  memo: "blend:1",
+});
+
+const row = (
+  id: bigint,
+  template_id = 42,
+  owner = "pxblend",
+  collection_name = COL,
+): ChainAsset => ({ source: "chain", id, owner, collection_name, template_id });
+
+const nft = (ids: bigint[], templates: number[]) => ({
+  firstReceiver: "atomicassets",
+  from: "alice",
+  to: "pxblend",
+  self: "pxblend",
+  assetIds: ids,
+  templateIds: templates,
   memo: "blend:1",
 });
 
@@ -101,10 +123,24 @@ test("1.00000000 PXJ is 100000000 units", () => {
 test("a held asset of the wrong template is refused", () => {
   const result = canCraft("alice", {
     ...vault,
-    assets: [{ id: 1001n, template_id: 7 }],
+    assets: [asset(1001n, 7)],
   }, recipe);
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.reason, "template mismatch");
+});
+
+test("the same template id in another collection is refused", () => {
+  const result = canCraft("alice", {
+    ...vault,
+    assets: [asset(1001n, 42, "othercol")],
+  }, recipe);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.reason, "wrong collection");
+  assert.throws(() => craft("alice", {
+    ...vault,
+    assets: [asset(1001n, 42, "othercol")],
+  }, recipe, "pxblend"), /wrong collection/);
+  assert.equal(vault.ft, ONE);
 });
 
 test("two required copies need two held assets", () => {
@@ -112,10 +148,7 @@ test("two required copies need two held assets", () => {
   assert.equal(canCraft("alice", vault, doubled).ok, false);
   assert.equal(canCraft("alice", {
     ...vault,
-    assets: [
-      { id: 1001n, template_id: 42 },
-      { id: 1002n, template_id: 42 },
-    ],
+    assets: [asset(1001n, 42), asset(1002n, 42)],
   }, doubled).ok, true);
 });
 
@@ -123,11 +156,7 @@ test("craft debits one PXJ and leaves the extra asset", () => {
   const held: Vault = {
     ...vault,
     ft: ONE + ONE / 2n,
-    assets: [
-      { id: 1002n, template_id: 42 },
-      { id: 1001n, template_id: 42 },
-      { id: 9n, template_id: 7 },
-    ],
+    assets: [asset(1002n, 42), asset(1001n, 42), asset(9n, 7)],
   };
   const result = craft("alice", held, recipe, "pxblend");
   assert.equal(result.minted, null);
@@ -138,14 +167,14 @@ test("craft debits one PXJ and leaves the extra asset", () => {
   assert.deepEqual(result.burns[0].data, { asset_owner: "pxblend", asset_id: "1001" });
   assert.equal(result.mint.sent, false);
   assert.equal(result.mint.name, "mintasset");
-  assert.equal(result.mint.data.collection_name, "examplecol");
+  assert.equal(result.mint.data.collection_name, COL);
   assert.equal(result.mint.data.schema_name, "examplesch");
   assert.equal(result.mint.data.template_id, 7);
   assert.equal(result.mint.data.new_asset_owner, "alice");
   assert.equal("asset_id" in result.mint.data, false);
   assert.equal(result.ftSpent, ONE);
   assert.equal(result.vault.ft, ONE / 2n);
-  assert.deepEqual(result.vault.assets.map((asset) => asset.id), [1002n, 9n]);
+  assert.deepEqual(result.vault.assets.map((item) => item.id), [1002n, 9n]);
   assert.equal(held.ft, ONE + ONE / 2n);
 });
 
@@ -184,7 +213,7 @@ test("21 asset ids are refused and a foreign nft contract is refused", () => {
     assetIds: ids,
     templateIds: ids.map(() => 42),
     memo: "blend:1",
-  }), /bad asset batch/);
+  }, null), /bad asset batch/);
   assert.throws(() => applyNftNotify(null, {
     firstReceiver: "fake.nft",
     from: "alice",
@@ -193,31 +222,46 @@ test("21 asset ids are refused and a foreign nft contract is refused", () => {
     assetIds: [1001n],
     templateIds: [42],
     memo: "blend:1",
-  }), /fake nft/);
+  }, [row(1001n)]), /fake nft/);
+});
+
+test("a deposit without a chain row is refused", () => {
+  assert.throws(() => applyNftNotify(null, nft([1001n], [42]), null), /not chain sourced/);
+  assert.throws(() => applyNftNotify(null, nft([1001n], [42]), []), /not chain sourced/);
+});
+
+test("a client template that disagrees with the chain row is refused", () => {
+  assert.throws(() => applyNftNotify(null, nft([1001n], [42]), [row(1001n, 7)]), /template mismatch/);
+});
+
+test("a pre-transfer owner is refused", () => {
+  assert.throws(() => applyNftNotify(null, nft([1001n], [42]), [row(1001n, 42, "alice")]), /stale owner/);
+  assert.throws(() => applyNftNotify(null, nft([1001n], [42]), [row(1001n, 42, "bob")]), /not the owner/);
+});
+
+test("the credited template and collection come from the chain row", () => {
+  const held = applyNftNotify(null, nft([1001n], [42]), [row(1001n)]);
+  assert.deepEqual(held.credited, [1001n]);
+  assert.equal(held.vault?.assets[0].template_id, 42);
+  assert.equal(held.vault?.assets[0].collection_name, COL);
 });
 
 test("deposits then craft once, and the second craft is refused", () => {
   const paid = applyFtNotify(null, pxj("1.00000000 PXJ"));
-  const held = applyNftNotify(paid.vault, {
-    firstReceiver: "atomicassets",
-    from: "alice",
-    to: "pxblend",
-    self: "pxblend",
-    assetIds: [1001n],
-    templateIds: [42],
-    memo: "blend:1",
-  });
+  const held = applyNftNotify(paid.vault, nft([1001n], [42]), [row(1001n)]);
   const once = craft("alice", held.vault, recipe, "pxblend");
   assert.equal(once.vault.ft, 0n);
   assert.equal(once.vault.assets.length, 0);
   assert.equal(once.minted, null);
+  assert.equal(once.burns[0].sent, false);
+  assert.equal(once.mint.sent, false);
   assert.throws(() => craft("alice", once.vault, recipe, "pxblend"), /non-positive FT/);
 });
 
 test("the owner withdraws the leftover half PXJ and it is not sent", () => {
   const crafted = craft("alice", { ...vault, ft: ONE + ONE / 2n, assets: [
-    { id: 1001n, template_id: 42 },
-    { id: 9n, template_id: 7 },
+    asset(1001n, 42),
+    asset(9n, 7),
   ] }, recipe, "pxblend");
   const out = withdrawFt("alice", crafted.vault, ONE / 2n, "pxblend");
   assert.equal(out.action.sent, false);
@@ -234,10 +278,7 @@ test("the owner withdraws the leftover half PXJ and it is not sent", () => {
 test("a consumed asset cannot be withdrawn and the leftover can", () => {
   const crafted = craft("alice", {
     ...vault,
-    assets: [
-      { id: 1001n, template_id: 42 },
-      { id: 9n, template_id: 7 },
-    ],
+    assets: [asset(1001n, 42), asset(9n, 7)],
   }, recipe, "pxblend");
   assert.throws(() => withdrawNfts("alice", crafted.vault, [1001n], "pxblend"), /missing asset/);
   const out = withdrawNfts("alice", crafted.vault, [9n], "pxblend");
@@ -250,10 +291,7 @@ test("a consumed asset cannot be withdrawn and the leftover can", () => {
 test("two consumed assets become two unsent burns and PXJ is not burned", () => {
   const result = craft("alice", {
     ...vault,
-    assets: [
-      { id: 1002n, template_id: 42 },
-      { id: 1001n, template_id: 42 },
-    ],
+    assets: [asset(1002n, 42), asset(1001n, 42)],
   }, { ...recipe, template_ids: [42, 42] }, "pxblend");
   assert.deepEqual(result.consumedIds, [1001n, 1002n]);
   assert.deepEqual(result.burns.map((burn) => burn.data.asset_id), ["1001", "1002"]);

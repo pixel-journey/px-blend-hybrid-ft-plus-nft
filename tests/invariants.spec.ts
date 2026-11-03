@@ -44,4 +44,9 @@ export const invariants = [
     attack: "Treat the burnasset and mintasset bodies as a completed craft.",
     expect: "asserted in blend.test.ts: sent is false, mintasset has no asset id, PXJ is not burned.",
   },
+  {
+    id: "chain-owner",
+    attack: "Credit a template the client claims, or a row whose owner is still the sender.",
+    expect: "asserted in blend.test.ts: not chain sourced, template mismatch, stale owner. No node is called.",
+  },
 ];

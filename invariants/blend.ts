@@ -1,4 +1,4 @@
-export type Asset = { id: bigint; template_id: number };
+export type Asset = { id: bigint; template_id: number; collection_name: string };
 
 export type Vault = {
   user: string;
@@ -14,6 +14,7 @@ export type Recipe = {
   ft_symbol: string;
   ft_contract: string;
   template_ids: number[];
+  ingredient_collection: string;
   output_collection: string;
   output_schema: string;
   output_template_id: number;
@@ -60,6 +61,19 @@ export type UnsignedMint = {
   sent: false;
 };
 
+/**
+ * A row the contract would have read from atomicassets::assets.
+ * source is checked at runtime. Omitting the read is not a row.
+ * After atomicassets::transfer, owner is already the recipient.
+ */
+export type ChainAsset = {
+  source: "chain";
+  id: bigint;
+  owner: string;
+  collection_name: string;
+  template_id: number;
+};
+
 /** PXJ is issued by pixeljourney. get_currency_stats on 2026-10-30: max_supply 10000000000.00000000 PXJ. */
 export const PXJ_CONTRACT = "pixeljourney";
 export const PXJ_SYMBOL = "8,PXJ";
@@ -98,17 +112,14 @@ export function canCraft(caller: string, vault: Vault | null, recipe: Recipe | n
   if (!recipe) return { ok: false, reason: "unknown recipe" };
   try {
     assertSymbol(recipe.ft_symbol);
-  } catch (err) {
-    return { ok: false, reason: err instanceof Error ? err.message : "bad quantity" };
-  }
-  if (recipe.ft_required < 1n) return { ok: false, reason: "bad recipe" };
-  if (recipe.template_ids.length === 0) return { ok: false, reason: "empty recipe" };
-  try {
+    assertName(recipe.ingredient_collection);
     assertName(recipe.output_collection);
     assertName(recipe.output_schema);
   } catch (err) {
     return { ok: false, reason: err instanceof Error ? err.message : "bad name" };
   }
+  if (recipe.ft_required < 1n) return { ok: false, reason: "bad recipe" };
+  if (recipe.template_ids.length === 0) return { ok: false, reason: "empty recipe" };
   if (!Number.isInteger(recipe.output_template_id) || recipe.output_template_id < 1) {
     return { ok: false, reason: "bad recipe" };
   }
@@ -124,6 +135,11 @@ export function canCraft(caller: string, vault: Vault | null, recipe: Recipe | n
     const key = asset.id.toString();
     if (seen.has(key)) return { ok: false, reason: "duplicate asset" };
     seen.add(key);
+    try {
+      assertName(asset.collection_name);
+    } catch (err) {
+      return { ok: false, reason: err instanceof Error ? err.message : "bad name" };
+    }
   }
 
   let need: Map<number, number>;
@@ -133,14 +149,18 @@ export function canCraft(caller: string, vault: Vault | null, recipe: Recipe | n
     return { ok: false, reason: err instanceof Error ? err.message : "bad template id" };
   }
   const have = new Map<number, number>();
+  const haveOther = new Map<number, number>();
   for (const asset of vault.assets) {
     if (!Number.isInteger(asset.template_id) || asset.template_id < 1) {
       return { ok: false, reason: "bad template id" };
     }
-    have.set(asset.template_id, (have.get(asset.template_id) ?? 0) + 1);
+    const bucket = asset.collection_name === recipe.ingredient_collection ? have : haveOther;
+    bucket.set(asset.template_id, (bucket.get(asset.template_id) ?? 0) + 1);
   }
   for (const [template, count] of need) {
-    if ((have.get(template) ?? 0) < count) return { ok: false, reason: "template mismatch" };
+    if ((have.get(template) ?? 0) >= count) continue;
+    if ((haveOther.get(template) ?? 0) > 0) return { ok: false, reason: "wrong collection" };
+    return { ok: false, reason: "template mismatch" };
   }
   return { ok: true };
 }
@@ -164,7 +184,7 @@ export function craft(caller: string, vault: Vault | null, recipe: Recipe | null
   const consumed = new Set<string>();
   for (const [template, count] of need) {
     const matches = vault.assets
-      .filter((asset) => asset.template_id === template)
+      .filter((asset) => asset.template_id === template && asset.collection_name === recipe.ingredient_collection)
       .map((asset) => asset.id)
       .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
     for (const id of matches.slice(0, count)) consumed.add(id.toString());
@@ -282,7 +302,11 @@ export type NftNotify = {
   memo: string;
 };
 
-export function applyNftNotify(vault: Vault | null, note: NftNotify): { vault: Vault | null; credited: bigint[] } {
+export function applyNftNotify(
+  vault: Vault | null,
+  note: NftNotify,
+  chain: readonly ChainAsset[] | null,
+): { vault: Vault | null; credited: bigint[] } {
   assertName(note.from);
   assertName(note.to);
   assertName(note.self);
@@ -291,18 +315,35 @@ export function applyNftNotify(vault: Vault | null, note: NftNotify): { vault: V
   if (!note.memo.startsWith("blend:")) throw new Error("memo must start with blend:");
   if (note.assetIds.length === 0 || note.assetIds.length > 20) throw new Error("bad asset batch");
   if (note.templateIds.length !== note.assetIds.length) throw new Error("bad asset batch");
+  if (chain === null) throw new Error("not chain sourced");
+  if (chain.length !== note.assetIds.length) throw new Error("not chain sourced");
+
+  const byId = new Map<string, ChainAsset>();
+  for (const row of chain) {
+    if (!row || row.source !== "chain") throw new Error("not chain sourced");
+    const key = row.id.toString();
+    if (byId.has(key)) throw new Error("duplicate asset");
+    byId.set(key, row);
+  }
+
   const incoming: Asset[] = [];
   const seen = new Set<string>((vault?.assets ?? []).map((asset) => asset.id.toString()));
   for (let i = 0; i < note.assetIds.length; i++) {
     const id = note.assetIds[i];
-    const template = note.templateIds[i];
     if (id < 1n || id > UINT64_MAX) throw new Error("bad asset id");
-    if (!Number.isInteger(template) || template < 1) throw new Error("bad template id");
     const key = id.toString();
     if (seen.has(key)) throw new Error("duplicate asset");
     seen.add(key);
-    incoming.push({ id, template_id: template });
+    const row = byId.get(key);
+    if (!row) throw new Error("missing asset");
+    if (row.owner === note.from) throw new Error("stale owner");
+    if (row.owner !== note.to) throw new Error("not the owner");
+    assertName(row.collection_name);
+    if (!Number.isInteger(row.template_id) || row.template_id < 1) throw new Error("bad template id");
+    if (note.templateIds[i] !== row.template_id) throw new Error("template mismatch");
+    incoming.push({ id, template_id: row.template_id, collection_name: row.collection_name });
   }
+
   if (!vault) {
     return {
       vault: { user: note.from, ft: 0n, ft_symbol: "", ft_contract: "", assets: incoming },
