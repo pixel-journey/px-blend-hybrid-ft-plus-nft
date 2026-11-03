@@ -88,6 +88,7 @@ export type ChainTemplate = {
   collection_name: string;
   schema_name: string;
   template_id: number;
+  burnable: boolean;
   max_supply: number;
   issued_supply: number;
 };
@@ -219,6 +220,23 @@ function assertMintRead(
   if (template.max_supply !== 0 && template.issued_supply >= template.max_supply) throw new Error("template full");
 }
 
+function assertBurnable(recipe: Recipe, rows: readonly ChainTemplate[] | null): void {
+  if (rows === null) throw new Error("not chain sourced");
+  const need = new Set(recipe.template_ids);
+  if (rows.length !== need.size) throw new Error("not chain sourced");
+  const seen = new Set<number>();
+  for (const row of rows) {
+    if (!row || row.source !== "chain") throw new Error("not chain sourced");
+    if (!Number.isInteger(row.template_id) || seen.has(row.template_id) || !need.has(row.template_id)) {
+      throw new Error("not chain sourced");
+    }
+    seen.add(row.template_id);
+    assertName(row.collection_name);
+    if (row.collection_name !== recipe.ingredient_collection) throw new Error("wrong collection");
+    if (row.burnable !== true) throw new Error("not burnable");
+  }
+}
+
 /** Debit the recipe and describe the burn and mint. Neither action is sent. PXJ is not burned. Issued supply is not incremented. */
 export function craft(
   caller: string,
@@ -227,12 +245,14 @@ export function craft(
   self: string,
   collection: ChainCollection | null,
   template: ChainTemplate | null,
+  ingredientTemplates: readonly ChainTemplate[] | null,
 ): CraftResult {
   assertName(self);
   const gate = canCraft(caller, vault, recipe);
   if (!gate.ok) throw new Error(gate.reason);
   if (!vault || !recipe) throw new Error("no vault");
   assertMintRead(self, recipe, collection, template);
+  assertBurnable(recipe, ingredientTemplates);
   const need = countTemplates(recipe.template_ids);
   const consumed = new Set<string>();
   for (const [template, count] of need) {

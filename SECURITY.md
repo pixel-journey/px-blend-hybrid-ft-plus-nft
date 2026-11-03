@@ -5,7 +5,7 @@
 - Only the user on the vault may craft it or withdraw from it.
 - A notify credits only when `from` is that user. A different `from` is refused.
 - An NFT credit requires a chain row per asset id. The owner on that row must already be this contract, which is what `atomicassets::transfer` writes before `require_recipient`. The sender as owner is a stale read and is refused. A third-party owner is refused.
-- A craft requires a chain row for the output collection and one for the output template. This contract must be the author or listed in `authorized_accounts`. The template must match the recipe's collection, schema, and id, and must not be at a non-zero max supply. The tests do not call AtomicAssets. A missing row is refused. `issued_supply` is not changed.
+- A craft requires a chain row for the output collection and one for the output template. This contract must be the author or listed in `authorized_accounts`. The template must match the recipe's collection, schema, and id, and must not be at a non-zero max supply. Each distinct ingredient template needs a chain row with `burnable` true in the ingredient collection. The tests do not call AtomicAssets. A missing row is refused. `issued_supply` is not changed.
 
 ## Inputs
 
@@ -27,6 +27,7 @@
 - 8-decimal PXJ, `pixeljourney` only, template counts, collection scope, debit, unsent withdraw, unsent `burnasset`, unsent `mintasset` with no new id.
 - Chain row required for a deposit. Stale owner, third-party owner, and a lying client template are refused.
 - Chain rows required before a mint body. Missing row, unauthorized minter, wrong schema, and a full template do not debit.
+- An unburnable ingredient template, or a missing ingredient template row, does not debit.
 - Non-owner, missing vault, unknown recipe, non-positive FT, insufficient FT, template mismatch, wrong collection.
 - Fake token contract, fake NFT contract, transfer not to the vault, outgoing transfer, batch of 21, mixed symbol.
 

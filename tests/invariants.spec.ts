@@ -54,4 +54,9 @@ export const invariants = [
     attack: "Return mintasset when this contract is not authorized, or when the template is full.",
     expect: "asserted in blend.test.ts: not a minter, template full, wrong schema. issued_supply is unchanged. No debit.",
   },
+  {
+    id: "burnable",
+    attack: "Burn an ingredient whose template row says burnable is false.",
+    expect: "asserted in blend.test.ts: not burnable. No debit. No node is called.",
+  },
 ];

@@ -17,6 +17,7 @@ AtomicAssets changes `owner` to the recipient before it notifies that recipient.
 - The recipe is a multiset of template ids inside one collection. Template 42 in another collection does not count. One asset of template 7 does not satisfy a recipe that asks for template 42.
 - The NFT credit stores `template_id` and `collection_name` from a chain row. No row, a row that is not marked `chain`, a stale owner, or a client template that disagrees is refused. The test passes the row in. It does not fetch one.
 - `mintasset` is refused unless a chain row says this contract is the collection author or an authorized account, and a second chain row says the output template exists on that collection and schema and is not full. A cap of 0 is unlimited. The test does not increment `issued_supply`.
+- `burnasset` is refused unless each distinct ingredient template has a chain row in the ingredient collection with `burnable` true. AtomicAssets rejects `burnasset` on a template that is not burnable. This book throws first and does not debit.
 - Extra assets stay. This is not the exact-set rule in `px-blend-simple-nft-to-nft`.
 - The FT debit and the asset removal happen in the returned vault together. A mismatch throws first.
 - Withdraw formats the leftover with 8 decimals and marks the action unsent. That is the body a later contract would send. This pass does not send it.
