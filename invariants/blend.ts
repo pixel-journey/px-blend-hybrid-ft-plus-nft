@@ -194,6 +194,11 @@ export type CraftResult = {
   burns: UnsignedBurn[];
   mint: UnsignedMint;
   minted: null;
+  /**
+   * Ordered unsent plan: burns, then PXJ sink transfer, then mint last.
+   * All sent: false. Issued supply is not incremented.
+   */
+  actions: Array<UnsignedBurn | UnsignedTransfer | UnsignedMint>;
 };
 
 function assertMintRead(
@@ -275,6 +280,41 @@ export function craft(
   }
   const consumedIds = [...consumed].map((id) => BigInt(id)).sort((a, b) => (a < b ? -1 : 1));
   const quantity = formatQuantity(recipe.ft_required, recipe.ft_symbol);
+  const ftSink: UnsignedTransfer = {
+    account: vault.ft_contract,
+    name: "transfer",
+    authorization: [{ actor: self, permission: "active" }],
+    data: {
+      from: self,
+      to: recipe.ft_sink,
+      quantity,
+      memo: `craft:${recipe.id}`,
+    },
+    sent: false,
+  };
+  const burns: UnsignedBurn[] = consumedIds.map((id) => ({
+    account: "atomicassets",
+    name: "burnasset",
+    authorization: [{ actor: self, permission: "active" }],
+    data: { asset_owner: self, asset_id: id.toString() },
+    sent: false,
+  }));
+  const mint: UnsignedMint = {
+    account: "atomicassets",
+    name: "mintasset",
+    authorization: [{ actor: self, permission: "active" }],
+    data: {
+      authorized_minter: self,
+      collection_name: recipe.output_collection,
+      schema_name: recipe.output_schema,
+      template_id: recipe.output_template_id,
+      new_asset_owner: caller,
+      immutable_data: [],
+      mutable_data: [],
+      tokens_to_back: [],
+    },
+    sent: false,
+  };
   return {
     vault: {
       ...vault,
@@ -283,42 +323,11 @@ export function craft(
     },
     consumedIds,
     ftSpent: recipe.ft_required,
-    ftSink: {
-      account: vault.ft_contract,
-      name: "transfer",
-      authorization: [{ actor: self, permission: "active" }],
-      data: {
-        from: self,
-        to: recipe.ft_sink,
-        quantity,
-        memo: `craft:${recipe.id}`,
-      },
-      sent: false,
-    },
-    burns: consumedIds.map((id) => ({
-      account: "atomicassets",
-      name: "burnasset",
-      authorization: [{ actor: self, permission: "active" }],
-      data: { asset_owner: self, asset_id: id.toString() },
-      sent: false,
-    })),
-    mint: {
-      account: "atomicassets",
-      name: "mintasset",
-      authorization: [{ actor: self, permission: "active" }],
-      data: {
-        authorized_minter: self,
-        collection_name: recipe.output_collection,
-        schema_name: recipe.output_schema,
-        template_id: recipe.output_template_id,
-        new_asset_owner: caller,
-        immutable_data: [],
-        mutable_data: [],
-        tokens_to_back: [],
-      },
-      sent: false,
-    },
+    ftSink,
+    burns,
+    mint,
     minted: null,
+    actions: [...burns, ftSink, mint],
   };
 }
 
