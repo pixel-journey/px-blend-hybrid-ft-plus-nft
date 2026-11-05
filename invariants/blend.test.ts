@@ -152,3 +152,15 @@ test("an unburnable ingredient does not debit", () => {
   ), /not burnable/);
   assert.equal(vault.ft, ONE);
 });
+
+test("orders burns, PXJ sink, then mint in actions", () => {
+  const result = craft("alice", vault, recipe, "pxblend", collection(), outputTemplate(), [burnedTemplate()]);
+  assert.equal(result.actions.length, 3);
+  assert.equal(result.actions.every((a) => a.sent === false), true);
+  assert.equal(result.actions[0].name, "burnasset");
+  assert.equal(result.actions[1].name, "transfer");
+  assert.equal(result.actions[1], result.ftSink);
+  assert.equal(result.actions[2].name, "mintasset");
+  assert.equal(result.actions[2], result.mint);
+  assert.equal(result.minted, null);
+});
