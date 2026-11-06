@@ -164,3 +164,33 @@ test("orders burns, PXJ sink, then mint in actions", () => {
   assert.equal(result.actions[2], result.mint);
   assert.equal(result.minted, null);
 });
+
+test("PXJ recipe on a non-pixeljourney contract is refused", () => {
+  const bad = { ...recipe, ft_contract: "eosio.token" };
+  const badVault = { ...vault, ft_contract: "eosio.token" };
+  const result = canCraft("alice", badVault, bad);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.reason, /pxj contract/);
+});
+
+test("eosio.token cannot credit 8-decimal PXJ", () => {
+  assert.throws(() => applyFtNotify(null, {
+    firstReceiver: "eosio.token",
+    tokenContract: "eosio.token",
+    from: "alice",
+    to: "pxblend",
+    self: "pxblend",
+    quantity: "1.00000000 PXJ",
+    memo: "blend:1",
+  }), /pxj contract/);
+});
+
+test("a PXJ contract mismatch does not debit", () => {
+  const bad = { ...recipe, ft_contract: "eosio.token" };
+  const badVault = { ...vault, ft_contract: "eosio.token" };
+  assert.throws(
+    () => craft("alice", badVault, bad, "pxblend", collection(), outputTemplate(), [burnedTemplate()]),
+    /pxj contract/,
+  );
+  assert.equal(vault.ft, ONE);
+});
