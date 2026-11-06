@@ -4,11 +4,8 @@ import {
   PXJ_CONTRACT,
   PXJ_SYMBOL,
   applyFtNotify,
-  applyNftNotify,
   canCraft,
   craft,
-  withdrawFt,
-  withdrawNfts,
   type ChainAsset,
   type ChainCollection,
   type ChainTemplate,
@@ -110,6 +107,13 @@ test("insufficient FT is refused", () => {
   if (!result.ok) assert.match(result.reason, /insufficient/);
 });
 
+test("the same template id in another collection is wrong collection", () => {
+  const held = { ...vault, assets: [asset(1001n, 42, "othercol")] };
+  const result = canCraft("alice", held, recipe);
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.match(result.reason, /wrong collection/);
+});
+
 test("craft returns an unsent sink transfer for spent PXJ", () => {
   const result = goodCraft();
   assert.equal(result.ftSpent, ONE);
@@ -199,6 +203,14 @@ test("refuses a missing chain asset list before any action body", () => {
   assert.equal(vault.ft, ONE);
 });
 
+test("refuses an empty chain asset list when one id is consumed", () => {
+  assert.throws(
+    () => craft("alice", vault, recipe, "pxblend", collection(), outputTemplate(), [burnedTemplate()], []),
+    /not chain sourced/,
+  );
+  assert.equal(vault.ft, ONE);
+});
+
 test("refuses a chain asset owned by someone else", () => {
   assert.throws(
     () => craft("alice", vault, recipe, "pxblend", collection(), outputTemplate(), [burnedTemplate()], [row(1001n, 42, "alice")]),
@@ -211,6 +223,78 @@ test("refuses a chain asset from the wrong collection", () => {
   assert.throws(
     () => craft("alice", vault, recipe, "pxblend", collection(), outputTemplate(), [burnedTemplate()], [row(1001n, 42, "pxblend", "othercol")]),
     /wrong collection/,
+  );
+  assert.equal(vault.ft, ONE);
+});
+
+test("refuses a chain asset whose template disagrees with the book", () => {
+  assert.throws(
+    () => craft("alice", vault, recipe, "pxblend", collection(), outputTemplate(), [burnedTemplate()], [row(1001n, 99)]),
+    /template mismatch/,
+  );
+  assert.equal(vault.ft, ONE);
+});
+
+test("craft debits one PXJ and leaves the extra asset", () => {
+  const held: Vault = {
+    ...vault,
+    ft: ONE + ONE / 2n,
+    assets: [asset(1002n, 42), asset(1001n, 42), asset(9n, 7)],
+  };
+  const result = craft(
+    "alice", held, recipe, "pxblend", collection(), outputTemplate(), [burnedTemplate()],
+    [row(1001n)],
+  );
+  assert.equal(result.ftSpent, ONE);
+  assert.equal(result.vault.ft, ONE / 2n);
+  assert.deepEqual(result.consumedIds, [1001n]);
+  assert.deepEqual(result.vault.assets.map((a) => a.id), [1002n, 9n]);
+  assert.equal(result.burns.length, 1);
+  assert.equal(result.burns[0].data.asset_id, "1001");
+  assert.equal(result.minted, null);
+});
+
+test("two required templates burn both lowest matching ids", () => {
+  const two: Recipe = { ...recipe, template_ids: [42, 42] };
+  const held: Vault = {
+    ...vault,
+    assets: [asset(1002n, 42), asset(1001n, 42), asset(1003n, 42)],
+  };
+  const result = craft(
+    "alice", held, two, "pxblend", collection(), outputTemplate(), [burnedTemplate()],
+    [row(1001n), row(1002n)],
+  );
+  assert.deepEqual(result.consumedIds, [1001n, 1002n]);
+  assert.equal(result.burns.length, 2);
+  assert.equal(result.actions.length, 4);
+  assert.equal(result.actions[0].name, "burnasset");
+  assert.equal(result.actions[1].name, "burnasset");
+  assert.equal(result.actions[2].name, "transfer");
+  assert.equal(result.actions[3].name, "mintasset");
+  assert.equal(result.vault.assets.length, 1);
+  assert.equal(result.vault.assets[0].id, 1003n);
+});
+
+test("a full output template does not debit", () => {
+  assert.throws(
+    () => craft(
+      "alice", vault, recipe, "pxblend", collection(),
+      outputTemplate({ max_supply: 10, issued_supply: 10 }),
+      [burnedTemplate()], chainAssets(),
+    ),
+    /template full/,
+  );
+  assert.equal(vault.ft, ONE);
+});
+
+test("a contract that is not a minter does not debit", () => {
+  assert.throws(
+    () => craft(
+      "alice", vault, recipe, "pxblend",
+      collection([], "someoneelse"),
+      outputTemplate(), [burnedTemplate()], chainAssets(),
+    ),
+    /not a minter/,
   );
   assert.equal(vault.ft, ONE);
 });
