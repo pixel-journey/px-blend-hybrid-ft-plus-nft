@@ -136,8 +136,12 @@ export function canCraft(caller: string, vault: Vault | null, recipe: Recipe | n
     assertName(recipe.output_collection);
     assertName(recipe.output_schema);
     assertName(recipe.ft_sink);
+    assertName(recipe.ft_contract);
   } catch (err) {
     return { ok: false, reason: err instanceof Error ? err.message : "bad name" };
+  }
+  if (recipe.ft_symbol === PXJ_SYMBOL && recipe.ft_contract !== PXJ_CONTRACT) {
+    return { ok: false, reason: "pxj contract" };
   }
   if (recipe.ft_required < 1n) return { ok: false, reason: "bad recipe" };
   if (recipe.template_ids.length === 0) return { ok: false, reason: "empty recipe" };
@@ -370,6 +374,9 @@ export function applyFtNotify(vault: Vault | null, note: FtNotify): { vault: Vau
   if (!note.memo.startsWith("blend:")) throw new Error("memo must start with blend:");
   const parsed = parseQuantity(note.quantity);
   if (parsed.amount < 1n) throw new Error("non-positive FT");
+  if (parsed.symbol === PXJ_SYMBOL && note.tokenContract !== PXJ_CONTRACT) {
+    throw new Error("pxj contract");
+  }
   if (!vault) {
     return {
       vault: {
