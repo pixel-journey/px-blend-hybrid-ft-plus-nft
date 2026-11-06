@@ -88,15 +88,11 @@ const burnedTemplate = (template_id = 42, burnable = true, collection_name = COL
   issued_supply: 0,
 });
 
-const nft = (ids: bigint[], templates: number[]) => ({
-  firstReceiver: "atomicassets",
-  from: "alice",
-  to: "pxblend",
-  self: "pxblend",
-  assetIds: ids,
-  templateIds: templates,
-  memo: "blend:1",
-});
+const chainAssets = (ids: bigint[] = [1001n]): ChainAsset[] =>
+  ids.map((id) => row(id));
+
+const goodCraft = () =>
+  craft("alice", vault, recipe, "pxblend", collection(), outputTemplate(), [burnedTemplate()], chainAssets());
 
 test("owner with sufficient ingredients may craft", () => {
   assert.equal(canCraft("alice", vault, recipe).ok, true);
@@ -115,7 +111,7 @@ test("insufficient FT is refused", () => {
 });
 
 test("craft returns an unsent sink transfer for spent PXJ", () => {
-  const result = craft("alice", vault, recipe, "pxblend", collection(), outputTemplate(), [burnedTemplate()]);
+  const result = goodCraft();
   assert.equal(result.ftSpent, ONE);
   assert.equal(result.ftSink.sent, false);
   assert.equal(result.ftSink.account, "pixeljourney");
@@ -125,7 +121,7 @@ test("craft returns an unsent sink transfer for spent PXJ", () => {
 });
 
 test("a refused craft does not debit", () => {
-  assert.throws(() => craft("alice", vault, { ...recipe, template_ids: [9] }, "pxblend", collection(), outputTemplate(), [burnedTemplate()]), /template mismatch/);
+  assert.throws(() => craft("alice", vault, { ...recipe, template_ids: [9] }, "pxblend", collection(), outputTemplate(), [burnedTemplate()], chainAssets()), /template mismatch/);
   assert.equal(vault.ft, ONE);
 });
 
@@ -148,13 +144,13 @@ test("four-decimal PXJ is refused", () => {
 
 test("an unburnable ingredient does not debit", () => {
   assert.throws(() => craft(
-    "alice", vault, recipe, "pxblend", collection(), outputTemplate(), [burnedTemplate(42, false)],
+    "alice", vault, recipe, "pxblend", collection(), outputTemplate(), [burnedTemplate(42, false)], chainAssets(),
   ), /not burnable/);
   assert.equal(vault.ft, ONE);
 });
 
 test("orders burns, PXJ sink, then mint in actions", () => {
-  const result = craft("alice", vault, recipe, "pxblend", collection(), outputTemplate(), [burnedTemplate()]);
+  const result = goodCraft();
   assert.equal(result.actions.length, 3);
   assert.equal(result.actions.every((a) => a.sent === false), true);
   assert.equal(result.actions[0].name, "burnasset");
@@ -189,8 +185,32 @@ test("a PXJ contract mismatch does not debit", () => {
   const bad = { ...recipe, ft_contract: "eosio.token" };
   const badVault = { ...vault, ft_contract: "eosio.token" };
   assert.throws(
-    () => craft("alice", badVault, bad, "pxblend", collection(), outputTemplate(), [burnedTemplate()]),
+    () => craft("alice", badVault, bad, "pxblend", collection(), outputTemplate(), [burnedTemplate()], chainAssets()),
     /pxj contract/,
+  );
+  assert.equal(vault.ft, ONE);
+});
+
+test("refuses a missing chain asset list before any action body", () => {
+  assert.throws(
+    () => craft("alice", vault, recipe, "pxblend", collection(), outputTemplate(), [burnedTemplate()], null),
+    /not chain sourced/,
+  );
+  assert.equal(vault.ft, ONE);
+});
+
+test("refuses a chain asset owned by someone else", () => {
+  assert.throws(
+    () => craft("alice", vault, recipe, "pxblend", collection(), outputTemplate(), [burnedTemplate()], [row(1001n, 42, "alice")]),
+    /not the owner/,
+  );
+  assert.equal(vault.ft, ONE);
+});
+
+test("refuses a chain asset from the wrong collection", () => {
+  assert.throws(
+    () => craft("alice", vault, recipe, "pxblend", collection(), outputTemplate(), [burnedTemplate()], [row(1001n, 42, "pxblend", "othercol")]),
+    /wrong collection/,
   );
   assert.equal(vault.ft, ONE);
 });
