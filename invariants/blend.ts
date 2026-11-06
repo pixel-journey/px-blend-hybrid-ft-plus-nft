@@ -155,18 +155,37 @@ export function canCraft(caller: string, vault: Vault | null, recipe: Recipe | n
   if (vault.assets.length === 0) return { ok: false, reason: "no NFTs" };
 
   const seen = new Set<string>();
-  for (const a of vault.assets) {
-    const key = a.id.toString();
+  for (const asset of vault.assets) {
+    if (asset.id < 1n || asset.id > UINT64_MAX) return { ok: false, reason: "bad asset id" };
+    const key = asset.id.toString();
     if (seen.has(key)) return { ok: false, reason: "duplicate asset" };
     seen.add(key);
+    try {
+      assertName(asset.collection_name);
+    } catch (err) {
+      return { ok: false, reason: err instanceof Error ? err.message : "bad name" };
+    }
   }
 
-  const need = countTemplates(recipe.template_ids);
-  for (const [tmpl, count] of need) {
-    const held = vault.assets.filter(
-      (a) => a.template_id === tmpl && a.collection_name === recipe.ingredient_collection,
-    ).length;
-    if (held < count) return { ok: false, reason: "template mismatch" };
+  let need: Map<number, number>;
+  try {
+    need = countTemplates(recipe.template_ids);
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : "bad template id" };
+  }
+  const have = new Map<number, number>();
+  const haveOther = new Map<number, number>();
+  for (const asset of vault.assets) {
+    if (!Number.isInteger(asset.template_id) || asset.template_id < 1) {
+      return { ok: false, reason: "bad template id" };
+    }
+    const bucket = asset.collection_name === recipe.ingredient_collection ? have : haveOther;
+    bucket.set(asset.template_id, (bucket.get(asset.template_id) ?? 0) + 1);
+  }
+  for (const [template, count] of need) {
+    if ((have.get(template) ?? 0) >= count) continue;
+    if ((haveOther.get(template) ?? 0) > 0) return { ok: false, reason: "wrong collection" };
+    return { ok: false, reason: "template mismatch" };
   }
   return { ok: true };
 }
