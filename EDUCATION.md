@@ -1,6 +1,6 @@
 # Education — FT plus NFT, still unsent
 
-> **Rung:** `npm test` passes. `craft` debits a **book** and returns `burnasset` / `mintasset` objects with `sent: false`. Nothing is broadcast. `contracts/src/px_hybrid_blend.cpp` is an uncompiled sketch. Issued supply is not incremented. PXJ is not burned.  
+> **Rung:** `npm test` passes. `craft` debits a **book** and returns `burnasset` / sink / `mintasset` objects with `sent: false`. Nothing is broadcast. `contracts/src/px_hybrid_blend.cpp` is an uncompiled sketch. Issued supply is not incremented. PXJ is not burned.  
 > **The test is the rule.**
 
 Do `px-blend-simple-nft-to-nft` first if you only need template counts. This lab adds a fungible leg, a token notify, a chain-row read, and a withdraw that is also unsent.
@@ -25,7 +25,7 @@ Alice's vault holds `ONE` and asset `1001` of template `42` in collection `examp
 
 `applyFtNotify` of quantity `1.00000000 PXJ`, first receiver `pixeljourney`, memo `blend:1`, to `pxblend`, credits `ONE` and records symbol `8,PXJ` and contract `pixeljourney`.
 
-`1.0000 PXJ` throws `pxj precision`. So does a vault symbol `4,PXJ`. A first receiver of `eosio.token` on a PXJ quantity throws `fake token`.
+`1.0000 PXJ` throws `pxj precision`. So does a vault symbol `4,PXJ`. A first receiver of `eosio.token` on a PXJ quantity throws `fake token`. A recipe that claims `8,PXJ` on `eosio.token` throws `pxj contract`.
 
 ### Words
 
@@ -51,7 +51,7 @@ npm test
 
 ## Intermediate — what craft consumes
 
-`craft` calls `canCraft`, then checks the output collection and template rows, then the ingredient template rows, then picks asset ids.
+`craft` calls `canCraft`, then checks the output collection and template rows, then the ingredient template rows, then picks asset ids, then checks a chain asset row for each consumed id.
 
 On a vault with FT `ONE + ONE/2` and assets `1002` (template 42), `1001` (template 42), `9` (template 7):
 
@@ -62,17 +62,30 @@ On a vault with FT `ONE + ONE/2` and assets `1002` (template 42), `1001` (templa
 | `vault.ft` | `ONE / 2` |
 | leftover asset ids | `1002`, then `9` |
 | burn | one `burnasset`, `asset_owner` `pxblend`, `asset_id` `"1001"`, `sent` false |
+| sink | unsent `pixeljourney::transfer` for exactly `ftSpent` |
 | mint | `mintasset`, template 7, schema `examplesch`, `new_asset_owner` `alice`, `sent` false, no `asset_id` field |
 | `minted` | `null` |
 | caller's original `held.ft` | unchanged. The function returns a new vault |
+| `actions` | burns, then sink, then mint |
 
 A refused craft (`template_ids: [9]`) throws `template mismatch` and the original `vault.ft` stays `ONE`.
 
 Two required copies of 42 become two burns, ids `1001` and `1002`, both unsent. No burn's account is `pixeljourney`. The fungible debit is only `vault.ft`. PXJ is not an AtomicAssets burn.
 
+### Chain asset rows at craft time
+
+The vault book is not ownership proof. After the consumed ids are chosen, `assertCraftAssets` requires one chain row per id:
+
+- `source: "chain"`
+- owner is the vault (`self`)
+- collection is `ingredient_collection`
+- template matches the book entry for that id
+
+A null list, a row owned by the user, or a row from another collection throws and does not debit. This is the same idea as the simple NFT lab's `assertAssets`, applied to the custodial vault model.
+
 ### Notifies
 
-FT: first receiver must equal the token contract. `from === self` or `to !== self` credits 0 and returns the same vault. Memo must start with `blend:`. A second symbol on an existing PXJ vault throws `mixed symbols`.
+FT: first receiver must equal the token contract. `from === self` or `to !== self` credits 0 and returns the same vault. Memo must start with `blend:`. A second symbol on an existing PXJ vault throws `mixed symbols`. PXJ from a non-`pixeljourney` contract throws `pxj contract`.
 
 NFT: first receiver must be `atomicassets` or the error is `fake nft`. More than 20 ids is `bad asset batch`, and that check happens **before** the chain-row check. The 21-id test passes `chain: null` and still gets the batch error.
 
@@ -99,21 +112,23 @@ Wrong schema throws `wrong schema` and does not debit. `burnable: false` throws 
 | Attack | Naive code | This lab | Test |
 | --- | --- | --- | --- |
 | Treat 4-decimal PXJ as 8-decimal | 10000x value error | `pxj precision` | `four-decimal PXJ is refused` |
-| `eosio.token` notifies a PXJ quantity | Fake deposit | `fake token` | `eosio.token cannot deliver PXJ` |
+| `eosio.token` notifies a PXJ quantity | Fake deposit | `fake token` / `pxj contract` | `eosio.token cannot deliver PXJ` |
+| Claim `8,PXJ` on a non-pixeljourney contract | Fake issuer | `pxj contract` | `PXJ recipe on a non-pixeljourney contract is refused` |
 | Count another collection's template 42 | Wrong NFT burned | `wrong collection` | `the same template id in another collection` |
 | Burn every held asset of that template | Extra NFT destroyed | lowest ids, only `count` of them | `craft debits one PXJ and leaves the extra asset` |
 | Trust the depositor's template id | Client spoof | chain row wins | `a client template that disagrees…` |
 | Read owner from before the transfer | You credit an asset you do not hold | `stale owner` | `a pre-transfer owner is refused` |
 | Mint without being a minter | Unauthorized mintasset | `not a minter`, no debit | `a contract that is not the author…` |
 | Mint a full template | Issued supply exceeded | `template full`, issued stays | `a full template does not debit…` |
+| Trust the vault book alone at craft | Burn an asset the contract no longer holds | chain asset row required | `refuses a missing chain asset list…` / `refuses a chain asset owned by someone else` |
 
 ---
 
 ## Masterclass — a debited book is not an atomic transaction
 
-`craft` subtracts FT and removes asset ids in the returned object, and sets `sent: false` on both the burns and the mint. If you later send those actions in a second transaction, the book and the chain can diverge: the vault already forgot the NFT, and AtomicAssets still has it, or the burn lands and the mint reverts. The simple blend course said the same thing about an intent. Here the bookkeeping looks more finished, which makes the gap easier to miss.
+`craft` subtracts FT and removes asset ids in the returned object, and sets `sent: false` on the burns, the sink, and the mint. If you later send those actions in a second transaction, the book and the chain can diverge: the vault already forgot the NFT, and AtomicAssets still has it, or the burn lands and the mint reverts. The simple blend course said the same thing about an intent. Here the bookkeeping looks more finished, which makes the gap easier to miss.
 
-`source: "chain"` is a field the test sets. A caller who stamps that tag on a homemade row passes `assertMintRead`. Production must load `atomicassets` tables inside the action. The tag is the reminder, not the load.
+`source: "chain"` is a field the test sets. A caller who stamps that tag on a homemade row passes `assertMintRead` and `assertCraftAssets`. Production must load `atomicassets` tables inside the action. The tag is the reminder, not the load.
 
 `applyFtNotify` does not check `get_first_receiver` beyond the string you passed as `firstReceiver`. A contract must read that from the notification context. The hybrid split (token contract versus `self`) is the one to copy. The template's `shouldHandleNotify` uses one string for both. Do not paste that into this vault.
 
@@ -124,6 +139,7 @@ Still absent: a broadcast, a PXJ balance on `pixeljourney` (the book is not the 
 1. How many minor units is `1.00000000 PXJ`? (`100000000n`. Tested.)
 2. Why does the craft with assets 1002, 1001, and 9 consume 1001 rather than 1002? (Matches are sorted, then sliced to the required count. Tested.)
 3. Does a successful craft increase `issued_supply`? (No. The open-template test leaves it at 100. `minted` stays null.)
+4. Why is the vault book not enough at craft time? (An external burn or transfer can leave the book lying. A chain asset row is required per consumed id. Tested.)
 
 ---
 
