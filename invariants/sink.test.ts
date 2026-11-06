@@ -4,6 +4,7 @@ import {
   PXJ_CONTRACT,
   canCraft,
   craft,
+  type ChainAsset,
   type ChainCollection,
   type ChainTemplate,
   type Recipe,
@@ -64,9 +65,18 @@ const burnedTemplate = (): ChainTemplate => ({
   issued_supply: 0,
 });
 
+const chainAssets = (ids: bigint[] = [1001n]): ChainAsset[] =>
+  ids.map((id) => ({
+    source: "chain",
+    id,
+    owner: "pxblend",
+    collection_name: COL,
+    template_id: 42,
+  }));
+
 test("spent PXJ goes to the sink and is not sent", () => {
   const held = { ...vault, ft: ONE + ONE / 2n };
-  const result = craft("alice", held, recipe, "pxblend", collection(), outputTemplate(), [burnedTemplate()]);
+  const result = craft("alice", held, recipe, "pxblend", collection(), outputTemplate(), [burnedTemplate()], chainAssets());
   assert.equal(result.ftSpent, ONE);
   assert.equal(result.vault.ft + result.ftSpent, held.ft);
   assert.equal(result.ftSink.sent, false);
@@ -80,11 +90,11 @@ test("spent PXJ goes to the sink and is not sent", () => {
 test("a sink that is the vault or the caller does not debit", () => {
   assert.throws(() => craft(
     "alice", vault, { ...recipe, ft_sink: "pxblend" }, "pxblend",
-    collection(), outputTemplate(), [burnedTemplate()],
+    collection(), outputTemplate(), [burnedTemplate()], chainAssets(),
   ), /sink is self/);
   assert.throws(() => craft(
     "alice", vault, { ...recipe, ft_sink: "alice" }, "pxblend",
-    collection(), outputTemplate(), [burnedTemplate()],
+    collection(), outputTemplate(), [burnedTemplate()], chainAssets(),
   ), /sink is the user/);
   assert.equal(vault.ft, ONE);
 });
