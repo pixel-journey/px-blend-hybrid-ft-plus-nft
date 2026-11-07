@@ -32,3 +32,11 @@ npm test
 No host is called by the tests. The currency stat above was a read, not a transfer.
 
 Do not deploy the sketch.
+
+## AtomicAssets v2
+
+The tested `mintasset` body sets `tokens_to_back` to `[]`. v2 rejects a non-empty vector (`Native backing has been deprecated`). Do not put the spent PXJ into that field. Spent PXJ is the unsent `pixeljourney::transfer` to `ft_sink`.
+
+Burns are `atomicassets::burnasset` of ingredient ids the vault already owns. That is not a release of `backed_tokens`. Custody of the ingredients is the `atomicassets::transfer` the caller must have sent first. v2 has no `holders` table to park them in.
+
+`contracts/src/px_hybrid_blend.cpp` still listens for `eosio.token` and still returns before a template match. The TypeScript rule refuses `eosio.token`. Do not compile the sketch and expect the tests.
