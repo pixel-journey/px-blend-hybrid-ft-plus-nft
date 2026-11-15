@@ -1,34 +1,34 @@
 # Worked examples — hybrid FT + NFT craft
 
-PXJ precision **8**: `1.00000000 PXJ` = `100_000_000` units. Token contract must be `pixeljourney`.
+`ONE = 100_000_000` (1.00000000 PXJ at precision **8**). Token contract **pixeljourney**. Sink under test `craft.pxj`. Ingredient template **42**, output template **7**.
 
-## Example A — deposit then craft
+## FT notify
 
-1. FT notify credits vault balance (only from `pixeljourney`).
-2. NFT notify accepts vault-owned chain rows with matching templates.
-3. Craft when: collection may mint, output supply open, ingredients burnable, one row per asset id, FT balance ≥ recipe cost.
-4. Unsent action order: **burns → sink transfer → mint**. `tokens_to_back` is `[]`.
+| Case | Result |
+| --- | --- |
+| memo `blend:1`, 1.00000000 PXJ from alice → pxblend | credits vault |
+| memo `deposit` | refused |
+| second symbol (eosio.token WAX) on PXJ vault | mixed symbols |
+| from pxblend → alice (outgoing) | credited **0** |
+| self → self | credited **0** |
+| 0.00000000 PXJ | non-positive FT |
 
-## Example B — wrong token contract
+## Sink on craft
 
-Notify from any account other than `pixeljourney` → refused. Balance unchanged.
+Vault holds `ONE + ONE/2`. Craft spends **ONE**:
 
-## Example C — wrong precision
+- `ftSpent` = ONE, vault remaining + spent = prior balance
+- `ftSink.sent` = **false**
+- transfer from `pxblend` → `craft.pxj`, quantity `1.00000000 PXJ`, memo `craft:1`
 
-Quantity that is not 8-decimal PXJ shape → refused.
+Sink = vault self (`pxblend`) or user (`alice`) → refused; vault.ft unchanged.
 
-## Example D — NFT without chain row
+Bad sink name `.bad` → `bad name` via canCraft.
 
-Client-only owner claim without `source: "chain"` style row → refused (same ownership discipline as simple blend).
+## Recipe / craft refusals
 
-## Example E — non-burnable ingredient
+Empty `template_ids` → empty recipe; craft does **not** debit. Non-burnable ingredient, wrong contract, client-only NFT rows — refused before action bodies.
 
-Template not burnable → craft refused before any action body.
+Unsent action order remains **burns → sink transfer → mint**. `tokens_to_back` is `[]`.
 
-## Example F — spent PXJ is sink transfer
-
-Spent FT is modeled as transfer to `ft_sink`, **not** a token `retire`/`burn`. Document that for treasury accounting.
-
-## Example G — C++ sketch warning
-
-`contracts/src/px_hybrid_blend.cpp` is uncompiled and may disagree with TypeScript on token account naming. **TypeScript tests are the rule** until aligned in wax-contract-compiler.
+C++ under `contracts/` is uncompiled; **TypeScript tests are the rule**.
