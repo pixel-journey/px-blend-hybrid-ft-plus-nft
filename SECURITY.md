@@ -5,13 +5,13 @@
 | Issue | Behavior |
 | --- | --- |
 | Non-owner craft / withdraw | refused |
-| PXJ not precision 8 / wrong contract | refused |
+| PXJ not precision **8** / wrong contract | refused |
 | Fake token / NFT first receiver | refused |
 | Client template ≠ chain row | refused |
 | Stale / third-party asset owner | refused |
 | Missing chain rows (collection, template, assets) | no debit |
 | Unburnable / full template / not a minter | no debit |
-| Batch > 20 / duplicate ids / mixed symbol | refused |
+| Batch > **20** / duplicate ids / mixed symbol | refused |
 | Template counts / wrong collection | refused |
 
 Burns → sink → mint in the returned action list; all **`sent: false`**. `minted` stays null. Issued supply is not incremented.
@@ -39,4 +39,13 @@ Burns → sink → mint in the returned action list; all **`sent: false`**. `min
 
 ## Honesty limits
 
-No live AtomicAssets read, no broadcast, no PXJ balance on `pixeljourney` (the book is not the token). Related: [simple blend](https://github.com/pixel-journey/px-blend-simple-nft-to-nft) · [wildcard](https://github.com/pixel-journey/px-blend-schema-wildcard-recipes) · [memo router](https://github.com/pixel-journey/px-memo-action-router) · [atomicassets-contract](https://github.com/pinknetworkx/atomicassets-contract).
+No live AtomicAssets read, no broadcast, no PXJ balance on `pixeljourney` (the book is not the token).
+
+| Sibling | Distinction |
+| --- | --- |
+| [simple blend](https://github.com/pixel-journey/px-blend-simple-nft-to-nft) | NFT-only template multiset |
+| [wildcard](https://github.com/pixel-journey/px-blend-schema-wildcard-recipes) | Exact-before-wildcard match |
+| [memo router](https://github.com/pixel-journey/px-memo-action-router) | Structured memos |
+| [decimal supply](https://github.com/pixel-journey/px-token-ft-decimal-supply-simulator) | Precision bounds |
+
+[atomicassets-contract](https://github.com/pinknetworkx/atomicassets-contract) · [docs.wax.io AtomicAssets](https://docs.wax.io/build/tutorials/howto_atomicassets).
