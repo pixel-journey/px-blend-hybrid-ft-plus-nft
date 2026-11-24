@@ -1,0 +1,15 @@
+# Copied from pixel-journey-standards/.github/workflow-templates/compliance.yml
+name: Compliance
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  compliance:
+    uses: pixel-journey/pixel-journey-standards/.github/workflows/reusable-org-compliance.yml@main
+  docs:
+    uses: pixel-journey/pixel-journey-standards/.github/workflows/reusable-docs-qa.yml@main
+    with:
+      markdownlint: false
